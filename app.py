@@ -115,13 +115,108 @@ def detect_url_type(url: str) -> str:
 
 # ─── Full-text extraction ────────────────────────────────────────────────────
 
+def _deep_find_content(obj, depth: int = 0) -> str:
+    """Recursively search nested JSON for a substantial text/html field."""
+    if depth > 6:
+        return ""
+    if isinstance(obj, dict):
+        for key in ["articleBody", "body", "content", "html", "text", "description"]:
+            val = obj.get(key, "")
+            if isinstance(val, str) and len(val) > 500:
+                return val
+        for val in obj.values():
+            result = _deep_find_content(val, depth + 1)
+            if result:
+                return result
+    elif isinstance(obj, list):
+        for item in obj[:10]:
+            result = _deep_find_content(item, depth + 1)
+            if result:
+                return result
+    return ""
+
+
+def extract_jsonld_content(html: str) -> str:
+    """Extract article body from JSON-LD structured data embedded in the page.
+    Many news sites (Vox Media, Atlantic, WaPo, etc.) embed the full article
+    text here even when the rendered page is paywalled or JS-only."""
+    soup = BeautifulSoup(html, "lxml")
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            raw = script.string or ""
+            if not raw.strip():
+                continue
+            data = json.loads(raw)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                body = item.get("articleBody", "")
+                if body and len(body) > 300:
+                    # Convert plain text paragraphs to HTML
+                    paras = [p.strip() for p in body.split("\n\n") if p.strip()]
+                    if paras:
+                        return "\n".join(f"<p>{p}</p>" for p in paras)
+                # Also check nested @graph arrays (used by some sites)
+                for graph_item in item.get("@graph", []):
+                    body = graph_item.get("articleBody", "")
+                    if body and len(body) > 300:
+                        paras = [p.strip() for p in body.split("\n\n") if p.strip()]
+                        if paras:
+                            return "\n".join(f"<p>{p}</p>" for p in paras)
+        except Exception:
+            continue
+    return ""
+
+
+def extract_nextjs_content(html: str) -> str:
+    """Extract article content from Next.js __NEXT_DATA__ JSON.
+    Next.js sites (NY Mag, The Atlantic, many modern news sites) embed the full
+    page data as JSON — including article body — in a <script> tag."""
+    m = re.search(
+        r'<script id="__NEXT_DATA__" type="application/json">(.+?)</script>',
+        html, re.DOTALL
+    )
+    if not m:
+        return ""
+    try:
+        data = json.loads(m.group(1))
+        props = data.get("props", {}).get("pageProps", {})
+        content = _deep_find_content(props)
+        if content and len(content) > 300:
+            # If it's plain text, wrap in paragraphs
+            if not content.strip().startswith("<"):
+                paras = [p.strip() for p in content.split("\n\n") if p.strip()]
+                content = "\n".join(f"<p>{p}</p>" for p in paras)
+            return content
+    except Exception as e:
+        logger.debug(f"Next.js extraction failed: {e}")
+    return ""
+
+
 def get_full_text(url: str) -> str:
-    """Extract the full article body as HTML using trafilatura, with BeautifulSoup fallback."""
+    """Extract the full article body as HTML.
+    Tries four strategies in order of reliability:
+    1. JSON-LD structured data (works for many Vox/Atlantic/WaPo articles)
+    2. Next.js __NEXT_DATA__ JSON (NY Mag, Atlantic, many modern news sites)
+    3. trafilatura (best general-purpose extractor)
+    4. BeautifulSoup naive fallback
+    """
     html = fetch_html(url)
     if not html:
         return ""
 
-    # trafilatura is best-in-class for news article extraction
+    # 1. JSON-LD — most reliable for news sites that support it
+    jsonld = extract_jsonld_content(html)
+    if jsonld:
+        logger.info(f"JSON-LD extraction succeeded [{url}]")
+        return jsonld
+
+    # 2. Next.js page data — catches JS-rendered news sites
+    nextjs = extract_nextjs_content(html)
+    if nextjs:
+        logger.info(f"Next.js extraction succeeded [{url}]")
+        return nextjs
+
+    # 3. trafilatura — best-in-class general extractor
     try:
         result = trafilatura.extract(
             html,
@@ -131,13 +226,14 @@ def get_full_text(url: str) -> str:
             include_tables=True,
             output_format="html",
             favor_recall=True,
+            no_fallback=False,
         )
-        if result:
+        if result and len(result) > 200:
             return result
     except Exception as e:
         logger.warning(f"trafilatura failed [{url}]: {e}")
 
-    # Fallback: naive BeautifulSoup article extraction
+    # 4. BeautifulSoup fallback
     try:
         soup = BeautifulSoup(html, "lxml")
         for tag in soup(["nav", "header", "footer", "aside", "script", "style", "noscript"]):
