@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RSS Feed Builder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #5b5ef4;
+      --primary-dark: #4547d4;
+      --primary-light: #eef0ff;
+      --green: #16a34a;
+      --green-light: #dcfce7;
+      --red: #dc2626;
+      --red-light: #fef2f2;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-400: #9ca3af;
+      --gray-600: #4b5563;
+      --gray-800: #1f2937;
+      --white: #ffffff;
+      --radius: 10px;
+      --shadow: 0 1px 4px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.06);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--gray-50);
+      color: var(--gray-800);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: #0f172a;
+      color: #fff;
+      padding: 28px 20px;
+      text-align: center;
+    }
+    .header-inner { max-width: 700px; margin: 0 auto; }
+    .header h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+    .header h1 span { color: #818cf8; }
+    .header p { color: #94a3b8; margin-top: 6px; font-size: 0.95rem; }
+
+    /* ── Container ── */
+    .container { max-width: 700px; margin: 36px auto; padding: 0 16px 60px; }
+
+    /* ── Card ── */
+    .card {
+      background: var(--white);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+    .card-title { font-size: 0.9rem; font-weight: 600; color: var(--gray-600); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 14px; }
+
+    /* ── URL Input ── */
+    .input-row { display: flex; gap: 10px; }
+    .url-input {
+      flex: 1;
+      padding: 11px 14px;
+      border: 2px solid var(--gray-200);
+      border-radius: 8px;
+      font-size: 0.95rem;
+      color: var(--gray-800);
+      outline: none;
+      transition: border-color 0.15s;
+      min-width: 0;
+    }
+    .url-input:focus { border-color: var(--primary); }
+    .url-input::placeholder { color: var(--gray-400); }
+    .btn-generate {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      padding: 11px 22px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-generate:hover:not(:disabled) { background: var(--primary-dark); }
+    .btn-generate:disabled { background: var(--gray-400); cursor: not-allowed; }
+
+    /* ── Examples ── */
+    .examples {
+      margin-top: 12px;
+      font-size: 0.84rem;
+      color: var(--gray-600);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .examples strong { color: var(--gray-800); }
+    .example-chip {
+      background: var(--primary-light);
+      color: var(--primary);
+      border: none;
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background 0.1s;
+    }
+    .example-chip:hover { background: #dde0ff; }
+
+    /* ── What this does ── */
+    .how-it-works { margin-top: 20px; }
+    .how-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+    .how-item { background: var(--gray-50); border-radius: 8px; padding: 14px 12px; font-size: 0.84rem; }
+    .how-item .icon { font-size: 1.4rem; margin-bottom: 6px; }
+    .how-item strong { display: block; color: var(--gray-800); margin-bottom: 4px; }
+    .how-item span { color: var(--gray-600); }
+
+    /* ── Loading ── */
+    #loadingSection { display: none; text-align: center; padding: 28px 16px; }
+    .spinner {
+      display: inline-block; width: 28px; height: 28px;
+      border: 3px solid var(--gray-200); border-top-color: var(--primary);
+      border-radius: 50%; animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { margin-top: 12px; color: var(--gray-600); font-size: 0.95rem; }
+    .loading-sub { margin-top: 4px; color: var(--gray-400); font-size: 0.82rem; }
+
+    /* ── Result ── */
+    #resultSection { display: none; }
+    .result-label { font-size: 0.9rem; font-weight: 600; color: var(--gray-600); margin-bottom: 10px; }
+    .feed-url-row {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--gray-50); border: 1.5px solid var(--gray-200);
+      border-radius: 8px; padding: 12px 14px;
+    }
+    .feed-url-row code {
+      flex: 1; font-family: "SF Mono", "Fira Mono", Menlo, monospace;
+      font-size: 0.82rem; color: var(--primary-dark); word-break: break-all;
+      min-width: 0;
+    }
+    .btn-copy {
+      background: var(--green); color: #fff; border: none;
+      padding: 7px 14px; border-radius: 6px; font-size: 0.82rem;
+      font-weight: 600; cursor: pointer; white-space: nowrap;
+      transition: background 0.15s; flex-shrink: 0;
+    }
+    .btn-copy:hover { background: #15803d; }
+    .btn-copy.copied { background: var(--gray-600); }
+
+    /* ── Feedly tip ── */
+    .feedly-tip {
+      margin-top: 12px; padding: 12px 14px;
+      background: #eff6ff; border: 1.5px solid #bfdbfe;
+      border-radius: 8px; font-size: 0.84rem; color: #1e40af;
+    }
+    .feedly-tip strong { color: #1d4ed8; }
+
+    /* ── Preview items ── */
+    .preview-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 24px; margin-bottom: 12px;
+    }
+    .preview-header h3 { font-size: 0.9rem; font-weight: 600; color: var(--gray-800); }
+    .preview-count {
+      background: var(--primary-light); color: var(--primary);
+      font-size: 0.78rem; font-weight: 600; padding: 2px 8px; border-radius: 99px;
+    }
+
+    .preview-list { border-top: 1.5px solid var(--gray-100); }
+    .preview-item {
+      padding: 12px 0; border-bottom: 1.5px solid var(--gray-100);
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .preview-item:last-child { border-bottom: none; }
+    .item-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+    .item-body { min-width: 0; }
+    .item-title {
+      font-size: 0.88rem; font-weight: 500; color: var(--gray-800);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden; line-height: 1.4;
+    }
+    .item-title a { color: inherit; text-decoration: none; }
+    .item-title a:hover { color: var(--primary); }
+    .item-badges { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
+    .badge {
+      display: inline-block; padding: 1px 7px; border-radius: 4px;
+      font-size: 0.72rem; font-weight: 500;
+    }
+    .badge-green { background: var(--green-light); color: var(--green); }
+    .badge-gray { background: var(--gray-100); color: var(--gray-600); }
+    .badge-purple { background: var(--primary-light); color: var(--primary); }
+
+    /* ── Error ── */
+    #errorSection { display: none; }
+    .error-box {
+      background: var(--red-light); border: 1.5px solid #fecaca;
+      border-radius: 8px; padding: 14px 16px; color: var(--red);
+      font-size: 0.88rem;
+    }
+
+    /* ── Notes section ── */
+    .notes { margin-top: 24px; }
+    .note { font-size: 0.82rem; color: var(--gray-600); margin-top: 6px; padding-left: 14px; position: relative; }
+    .note::before { content: "•"; position: absolute; left: 0; color: var(--gray-400); }
+
+    @media (max-width: 540px) {
+      .how-grid { grid-template-columns: 1fr; }
+      .input-row { flex-direction: column; }
+      .btn-generate { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <h1>📡 RSS Feed <span>Builder</span></h1>
+    <p>Paste any URL — get a full-text RSS feed you can add to Feedly or any reader</p>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- Input card -->
+  <div class="card">
+    <div class="card-title">Enter a URL to convert</div>
+    <div class="input-row">
+      <input
+        type="url"
+        id="urlInput"
+        class="url-input"
+        placeholder="https://www.washingtonpost.com/people/reporter-name/"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button class="btn-generate" id="generateBtn" onclick="generateFeed()">
+        Generate Feed
+      </button>
+    </div>
+    <div class="examples">
+      <strong>Try:</strong>
+      <button class="example-chip" onclick="setExample('https://www.youtube.com/results?search_query=artificial+intelligence+news')">YouTube search</button>
+      <button class="example-chip" onclick="setExample('https://www.nytimes.com/by/ezra-klein')">Author page</button>
+      <button class="example-chip" onclick="setExample('https://www.youtube.com/@veritasium')">YouTube channel</button>
+      <button class="example-chip" onclick="setExample('https://simonwillison.substack.com/')">Substack</button>
+    </div>
+
+    <!-- How it works mini-grid -->
+    <div class="how-it-works">
+      <div class="how-grid">
+        <div class="how-item">
+          <div class="icon">📰</div>
+          <strong>Author pages</strong>
+          <span>WaPo, NYMag, Atlantic, any news site</span>
+        </div>
+        <div class="how-item">
+          <div class="icon">▶️</div>
+          <strong>YouTube</strong>
+          <span>Searches, channels, and playlists</span>
+        </div>
+        <div class="how-item">
+          <div class="icon">✉️</div>
+          <strong>Newsletters</strong>
+          <span>Substack authors and other feeds</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div class="card" id="loadingSection">
+    <div class="spinner"></div>
+    <p class="loading-text">Analyzing page and building your feed…</p>
+    <p class="loading-sub">This can take 15–30 seconds for full-text extraction</p>
+  </div>
+
+  <!-- Result -->
+  <div class="card" id="resultSection">
+    <div class="result-label">Your RSS Feed URL</div>
+    <div class="feed-url-row">
+      <code id="feedUrl"></code>
+      <button class="btn-copy" id="copyBtn" onclick="copyFeedUrl()">Copy</button>
+    </div>
+    <div class="feedly-tip">
+      <strong>Add to Feedly:</strong> Open Feedly → click <em>Add Content</em> → paste this URL → click <em>Follow</em>.<br>
+      Works with any RSS reader: NetNewsWire, Reeder, Inoreader, Readwise Reader, etc.
+    </div>
+
+    <div class="preview-header">
+      <h3>Preview — items found</h3>
+      <span class="preview-count" id="previewCount">0 items</span>
+    </div>
+    <div class="preview-list" id="previewList"></div>
+
+    <div class="notes">
+      <div class="note">The feed URL is permanent — add it to your reader once and it stays up to date.</div>
+      <div class="note">Full text is fetched fresh each time your reader polls the feed (cached for 30 min).</div>
+      <div class="note">Sites that require a login or heavy JavaScript may only return headlines.</div>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="errorSection">
+    <div class="error-box" id="errorMessage"></div>
+  </div>
+
+</main>
+
+<script>
+  const urlInput = document.getElementById('urlInput');
+  const generateBtn = document.getElementById('generateBtn');
+
+  function setExample(url) {
+    urlInput.value = url;
+    urlInput.focus();
+  }
+
+  function showSection(id) {
+    ['loadingSection', 'resultSection', 'errorSection'].forEach(s => {
+      document.getElementById(s).style.display = 'none';
+    });
+    document.getElementById(id).style.display = 'block';
+  }
+
+  async function generateFeed() {
+    const rawUrl = urlInput.value.trim();
+    if (!rawUrl) {
+      urlInput.focus();
+      urlInput.style.borderColor = '#ef4444';
+      setTimeout(() => urlInput.style.borderColor = '', 1500);
+      return;
+    }
+
+    generateBtn.disabled = true;
+    showSection('loadingSection');
+
+    try {
+      const params = new URLSearchParams({ url: rawUrl });
+      const resp = await fetch('/preview?' + params.toString());
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+        throw new Error(err.error || `Server error ${resp.status}`);
+      }
+
+      const data = await resp.json();
+
+      if (data.error) throw new Error(data.error);
+
+      // Populate result
+      document.getElementById('feedUrl').textContent = data.feed_url;
+      document.getElementById('previewCount').textContent =
+        data.items_found === 1 ? '1 item' : `${data.items_found} items`;
+
+      const list = document.getElementById('previewList');
+      list.innerHTML = '';
+
+      if (!data.preview_items || data.preview_items.length === 0) {
+        list.innerHTML = '<p style="color:var(--gray-400);font-size:0.88rem;padding:12px 0;">No preview items — the feed may still work when polled by your RSS reader.</p>';
+      } else {
+        for (const item of data.preview_items) {
+          const div = document.createElement('div');
+          div.className = 'preview-item';
+          const icon = item.type === 'youtube' ? '▶️' : '📄';
+          const fullTextBadge = item.has_full_text
+            ? '<span class="badge badge-green">✓ Full text</span>'
+            : '<span class="badge badge-gray">Headline + extract</span>';
+          const typeBadge = item.type === 'youtube'
+            ? '<span class="badge badge-purple">YouTube</span>'
+            : '<span class="badge badge-gray">Article</span>';
+          div.innerHTML = `
+            <span class="item-icon">${icon}</span>
+            <div class="item-body">
+              <div class="item-title">
+                <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>
+              </div>
+              <div class="item-badges">${fullTextBadge}${typeBadge}</div>
+            </div>`;
+          list.appendChild(div);
+        }
+      }
+
+      // Reset copy button
+      const copyBtn = document.getElementById('copyBtn');
+      copyBtn.textContent = 'Copy';
+      copyBtn.classList.remove('copied');
+
+      showSection('resultSection');
+    } catch (err) {
+      document.getElementById('errorMessage').innerHTML =
+        `<strong>Couldn't generate feed:</strong> ${escapeHtml(err.message)}<br><br>` +
+        `<small>Make sure the URL is publicly accessible. Some sites block automated requests.</small>`;
+      showSection('errorSection');
+    } finally {
+      generateBtn.disabled = false;
+    }
+  }
+
+  function copyFeedUrl() {
+    const url = document.getElementById('feedUrl').textContent;
+    const btn = document.getElementById('copyBtn');
+    navigator.clipboard.writeText(url).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2500);
+    }).catch(() => {
+      // Fallback for older browsers
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 2500);
+    });
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // Allow Enter key in input
+  urlInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') generateFeed();
+  });
+</script>
+</body>
+</html>
