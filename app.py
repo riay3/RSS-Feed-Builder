@@ -515,6 +515,29 @@ def get_yt_items_scrape(search_query: str) -> list[dict]:
     return items
 
 
+def yt_search_url_by_date(query: str) -> str:
+    """Return a YouTube search URL sorted by upload date.
+    &sp=CAI%3D is YouTube's encoded filter for 'Sort by: Upload date'."""
+    return f"https://www.youtube.com/results?search_query={quote(query)}&sp=CAI%3D"
+
+
+def sort_by_date(items: list[dict]) -> list[dict]:
+    """Sort feed items newest-first, treating missing dates as oldest."""
+    def _key(item):
+        d = item.get("date")
+        if not d:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        if isinstance(d, str):
+            try:
+                d = datetime.fromisoformat(d)
+            except Exception:
+                return datetime.min.replace(tzinfo=timezone.utc)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d
+    return sorted(items, key=_key, reverse=True)
+
+
 def get_yt_channel_items(url: str) -> list[dict]:
     """Get YouTube channel videos — tries yt-dlp first, then official RSS."""
     if HAS_YTDLP:
@@ -711,7 +734,7 @@ def generate_feed_for_url(url: str, self_url: str) -> tuple[str, str]:
         parsed = urlparse(url)
         query = parse_qs(parsed.query).get("search_query", [""])[0]
         items = (
-            get_yt_items_ytdlp(f"ytsearch{MAX_ITEMS}:{query}")
+            sort_by_date(get_yt_items_ytdlp(yt_search_url_by_date(query)))
             if HAS_YTDLP
             else get_yt_items_scrape(query)
         )
@@ -774,7 +797,7 @@ def generate_preview_for_url(url: str, base_url: str) -> dict:
         parsed = urlparse(url)
         query = parse_qs(parsed.query).get("search_query", [""])[0]
         items = (
-            get_yt_items_ytdlp(f"ytsearch5:{query}", max_items=5)
+            sort_by_date(get_yt_items_ytdlp(yt_search_url_by_date(query), max_items=5))
             if HAS_YTDLP
             else get_yt_items_scrape(query)[:5]
         )
