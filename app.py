@@ -388,12 +388,19 @@ def parse_rss_feed(feed_url: str, enhance_full_text: bool = True) -> list[dict]:
                     pass
 
             url = entry.get("link", "")
+            # Capture author — feedparser exposes dc:creator as entry.author
+            author = ""
+            if hasattr(entry, "author"):
+                author = entry.author or ""
+            elif hasattr(entry, "authors") and entry.authors:
+                author = entry.authors[0].get("name", "")
             item = {
                 "title": entry.get("title", "Untitled"),
                 "url": url,
                 "description": entry.get("summary", ""),
                 "date": date,
                 "full_text": content,
+                "author": author,
                 "type": "article",
             }
             items.append(item)
@@ -621,6 +628,28 @@ def get_generic_items(url: str) -> list[dict]:
 
     # 2. Try WordPress-style /feed/ URL
     parsed = urlparse(url)
+
+    # 2a. If this is an author URL, try fetching the site-wide RSS and filtering
+    #     by author name. Works for sites like Jewish Currents that have a global
+    #     /feed but no per-author feed, and include dc:creator in their RSS items.
+    author_match = re.search(r"/author/([^/?#]+)", parsed.path, re.I)
+    if author_match:
+        author_slug = author_match.group(1)  # e.g. "alex-kane"
+        # Convert slug to display name for fuzzy matching ("alex-kane" → "alex kane")
+        author_name = author_slug.replace("-", " ").lower()
+        site_feed = f"{parsed.scheme}://{parsed.netloc}/feed"
+        logger.info(f"Trying site-wide RSS filter for author '{author_name}' at {site_feed}")
+        all_items = parse_rss_feed(site_feed, enhance_full_text=True)
+        filtered = [
+            item for item in all_items
+            if author_name in (item.get("author") or "").lower()
+        ]
+        if filtered:
+            logger.info(f"Author filter found {len(filtered)} items for '{author_name}'")
+            return filtered
+        # If no author metadata in feed, fall through to other strategies
+
+    # 2b. Try WordPress per-author feed URL pattern
     if re.search(r"/author/|/people/|/writer|/contributor", parsed.path, re.I):
         wp_feed = url.rstrip("/") + "/feed/"
         test = fetch_html(wp_feed)
