@@ -47,7 +47,7 @@ HEADERS = {
 }
 
 MAX_ITEMS = 15          # Max feed entries
-FULL_TEXT_MAX = 10      # Max articles to fetch full text for
+FULL_TEXT_MAX = 3       # Max articles to fetch full text for (keep low to avoid Feedly timeouts)
 REQUEST_TIMEOUT = 15    # Per-request timeout in seconds
 CACHE_TTL = 1800        # Cache for 30 minutes
 
@@ -953,6 +953,8 @@ def feed_route():
     if cached:
         resp = Response(cached, mimetype="application/rss+xml")
         resp.headers["X-Cache"] = "HIT"
+        resp.headers["Cache-Control"] = "public, max-age=1800"
+        resp.headers["Last-Modified"] = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
         return resp
 
     try:
@@ -960,6 +962,8 @@ def feed_route():
         cache_set(cache_key, rss)
         resp = Response(rss, mimetype="application/rss+xml")
         resp.headers["X-Cache"] = "MISS"
+        resp.headers["Cache-Control"] = "public, max-age=1800"
+        resp.headers["Last-Modified"] = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
         return resp
     except Exception as e:
         logger.exception(f"Feed generation error [{url}]")
