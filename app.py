@@ -618,37 +618,37 @@ def get_generic_items(url: str) -> list[dict]:
     if not html:
         return []
 
-    # 1. Check for existing RSS link in page <head>
-    rss_url = find_rss_in_page(html, url)
-    if rss_url and rss_url != url:
-        logger.info(f"Found RSS in page: {rss_url}")
-        items = parse_rss_feed(rss_url, enhance_full_text=True)
-        if items:
-            return items
-
-    # 2. Try WordPress-style /feed/ URL
     parsed = urlparse(url)
 
-    # 2a. If this is an author URL, try fetching the site-wide RSS and filtering
-    #     by author name. Works for sites like Jewish Currents that have a global
-    #     /feed but no per-author feed, and include dc:creator in their RSS items.
+    # 1. Author pages: always filter by author, regardless of which RSS source we find.
+    #    Must run BEFORE the generic RSS-in-head check, because many sites embed a
+    #    site-wide RSS link in <head> that would otherwise return all authors' articles.
     author_match = re.search(r"/author/([^/?#]+)", parsed.path, re.I)
     if author_match:
         author_slug = author_match.group(1)  # e.g. "alex-kane"
-        # Convert slug to display name for fuzzy matching ("alex-kane" → "alex kane")
         author_name = author_slug.replace("-", " ").lower()
-        site_feed = f"{parsed.scheme}://{parsed.netloc}/feed"
-        logger.info(f"Trying site-wide RSS filter for author '{author_name}' at {site_feed}")
-        # Fetch RSS without full text first, filter by author, THEN fetch full text
-        # only for matching items — avoids fetching text for other authors' articles
-        all_items = parse_rss_feed(site_feed, enhance_full_text=False)
+
+        # 1a. Try a per-author feed URL directly (works on many WordPress sites)
+        per_author_feed = url.rstrip("/") + "/feed/"
+        test = fetch_html(per_author_feed)
+        if test and "<rss" in test:
+            logger.info(f"Found per-author feed: {per_author_feed}")
+            items = parse_rss_feed(per_author_feed, enhance_full_text=True)
+            if items:
+                return items
+
+        # 1b. Fall back to site-wide RSS (from <head> or /feed) filtered by author name
+        rss_url = find_rss_in_page(html, url)
+        if not rss_url or rss_url == url:
+            rss_url = f"{parsed.scheme}://{parsed.netloc}/feed"
+        logger.info(f"Filtering '{rss_url}' by author '{author_name}'")
+        all_items = parse_rss_feed(rss_url, enhance_full_text=False)
         filtered = [
             item for item in all_items
             if author_name in (item.get("author") or "").lower()
         ]
         if filtered:
             logger.info(f"Author filter found {len(filtered)} items for '{author_name}'")
-            # Now fetch full text only for this author's articles
             urls_needed = [i["url"] for i in filtered if len(i.get("full_text", "")) < 600]
             if urls_needed:
                 full_texts = get_full_texts_parallel(urls_needed[:FULL_TEXT_MAX])
@@ -656,10 +656,19 @@ def get_generic_items(url: str) -> list[dict]:
                     if item["url"] in full_texts and full_texts[item["url"]]:
                         item["full_text"] = full_texts[item["url"]]
             return filtered
-        # If no author metadata in feed, fall through to other strategies
+        # RSS had no author metadata — fall through to page scraping below
 
-    # 2b. Try WordPress per-author feed URL pattern
-    if re.search(r"/author/|/people/|/writer|/contributor", parsed.path, re.I):
+    # 2. Non-author pages: check for an RSS link in <head>
+    if not author_match:
+        rss_url = find_rss_in_page(html, url)
+        if rss_url and rss_url != url:
+            logger.info(f"Found RSS in page: {rss_url}")
+            items = parse_rss_feed(rss_url, enhance_full_text=True)
+            if items:
+                return items
+
+    # 3. Try WordPress-style /feed/ URL for people/writer/contributor pages
+    if re.search(r"/people/|/writer|/contributor", parsed.path, re.I):
         wp_feed = url.rstrip("/") + "/feed/"
         test = fetch_html(wp_feed)
         if test and "<rss" in test:
@@ -667,7 +676,7 @@ def get_generic_items(url: str) -> list[dict]:
             if items:
                 return items
 
-    # 3. Scrape article links directly from the page
+    # 4. Scrape article links directly from the page
     links = extract_links_from_page(html, url)
     if not links:
         return []
