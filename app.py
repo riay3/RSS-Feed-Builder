@@ -363,7 +363,7 @@ def find_rss_in_page(html: str, base_url: str) -> str | None:
 
 # ─── RSS / Atom feed parser (for existing feeds) ─────────────────────────────
 
-def parse_rss_feed(feed_url: str, enhance_full_text: bool = True) -> list[dict]:
+def parse_rss_feed(feed_url: str, enhance_full_text: bool = True, fetch_limit: int = MAX_ITEMS) -> list[dict]:
     """Fetch and parse an existing RSS/Atom feed, optionally enhancing with full text."""
     try:
         feed = feedparser.parse(feed_url, request_headers=HEADERS)
@@ -373,7 +373,7 @@ def parse_rss_feed(feed_url: str, enhance_full_text: bool = True) -> list[dict]:
         items: list[dict] = []
         needs_full_text: list[str] = []
 
-        for entry in feed.entries[:MAX_ITEMS]:
+        for entry in feed.entries[:fetch_limit]:
             content = ""
             if hasattr(entry, "content") and entry.content:
                 content = entry.content[0].get("value", "")
@@ -642,11 +642,12 @@ def get_generic_items(url: str) -> list[dict]:
         if not rss_url or rss_url == url:
             rss_url = f"{parsed.scheme}://{parsed.netloc}/feed"
         logger.info(f"Filtering '{rss_url}' by author '{author_name}'")
-        all_items = parse_rss_feed(rss_url, enhance_full_text=False)
+        # Fetch up to 50 entries so we don't miss recent articles in a busy site feed
+        all_items = parse_rss_feed(rss_url, enhance_full_text=False, fetch_limit=50)
         filtered = [
             item for item in all_items
             if author_name in (item.get("author") or "").lower()
-        ]
+        ][:MAX_ITEMS]  # Cap results after filtering
         if filtered:
             logger.info(f"Author filter found {len(filtered)} items for '{author_name}'")
             urls_needed = [i["url"] for i in filtered if len(i.get("full_text", "")) < 600]
