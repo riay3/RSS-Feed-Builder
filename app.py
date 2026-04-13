@@ -639,13 +639,22 @@ def get_generic_items(url: str) -> list[dict]:
         author_name = author_slug.replace("-", " ").lower()
         site_feed = f"{parsed.scheme}://{parsed.netloc}/feed"
         logger.info(f"Trying site-wide RSS filter for author '{author_name}' at {site_feed}")
-        all_items = parse_rss_feed(site_feed, enhance_full_text=True)
+        # Fetch RSS without full text first, filter by author, THEN fetch full text
+        # only for matching items — avoids fetching text for other authors' articles
+        all_items = parse_rss_feed(site_feed, enhance_full_text=False)
         filtered = [
             item for item in all_items
             if author_name in (item.get("author") or "").lower()
         ]
         if filtered:
             logger.info(f"Author filter found {len(filtered)} items for '{author_name}'")
+            # Now fetch full text only for this author's articles
+            urls_needed = [i["url"] for i in filtered if len(i.get("full_text", "")) < 600]
+            if urls_needed:
+                full_texts = get_full_texts_parallel(urls_needed[:FULL_TEXT_MAX])
+                for item in filtered:
+                    if item["url"] in full_texts and full_texts[item["url"]]:
+                        item["full_text"] = full_texts[item["url"]]
             return filtered
         # If no author metadata in feed, fall through to other strategies
 
