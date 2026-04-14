@@ -603,6 +603,71 @@ def format_youtube_html(item: dict) -> str:
     return html
 
 
+# ─── WordPress REST API ──────────────────────────────────────────────────────
+
+def try_wordpress_api(base_url: str, author_slug: str) -> list[dict]:
+    """Query WordPress REST API for posts by author slug. More reliable than
+    filtering the site-wide RSS, since it's paginated and author-specific."""
+    try:
+        # Step 1: resolve slug → numeric author ID
+        users_url = f"{base_url}/wp-json/wp/v2/users?slug={author_slug}"
+        r = requests.get(users_url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        users = r.json()
+        if not isinstance(users, list) or not users:
+            return []
+        author_id = users[0].get("id")
+        author_name = users[0].get("name", author_slug.replace("-", " ").title())
+        if not author_id:
+            return []
+
+        # Step 2: fetch posts by that author ID
+        posts_url = (
+            f"{base_url}/wp-json/wp/v2/posts"
+            f"?author={author_id}&per_page={MAX_ITEMS}&orderby=date&order=desc"
+        )
+        r = requests.get(posts_url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        if r.status_code != 200:
+            return []
+        posts = r.json()
+        if not isinstance(posts, list):
+            return []
+
+        items = []
+        for post in posts:
+            date = datetime.now(timezone.utc)
+            try:
+                date_str = post.get("date_gmt", "") or post.get("date", "")
+                if date_str:
+                    date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+
+            content_html = post.get("content", {}).get("rendered", "")
+            excerpt_html = post.get("excerpt", {}).get("rendered", "")
+            soup_c = BeautifulSoup(content_html, "lxml") if content_html else None
+            soup_e = BeautifulSoup(excerpt_html, "lxml") if excerpt_html else None
+
+            items.append({
+                "title": BeautifulSoup(
+                    post.get("title", {}).get("rendered", "Untitled"), "lxml"
+                ).get_text(strip=True),
+                "url": post.get("link", ""),
+                "description": soup_e.get_text(" ", strip=True) if soup_e else "",
+                "date": date,
+                "full_text": soup_c.get_text(" ", strip=True) if soup_c else "",
+                "author": author_name,
+                "type": "article",
+            })
+
+        logger.info(f"WordPress API returned {len(items)} posts for author '{author_slug}'")
+        return items
+    except Exception as e:
+        logger.warning(f"WordPress API failed [{base_url}/author/{author_slug}]: {e}")
+        return []
+
+
 # ─── Substack ────────────────────────────────────────────────────────────────
 
 def get_substack_items(url: str) -> list[dict]:
@@ -628,7 +693,13 @@ def get_generic_items(url: str) -> list[dict]:
         author_slug = author_match.group(1)  # e.g. "alex-kane"
         author_name = author_slug.replace("-", " ").lower()
 
-        # 1a. Try a per-author feed URL directly (works on many WordPress sites)
+        # 1a. Try WordPress REST API — most reliable for WordPress author pages
+        base = f"{parsed.scheme}://{parsed.netloc}"
+        wp_items = try_wordpress_api(base, author_slug)
+        if wp_items:
+            return wp_items
+
+        # 1b. Try a per-author feed URL directly (works on many WordPress sites)
         per_author_feed = url.rstrip("/") + "/feed/"
         test = fetch_html(per_author_feed)
         if test and "<rss" in test:
@@ -637,7 +708,7 @@ def get_generic_items(url: str) -> list[dict]:
             if items:
                 return items
 
-        # 1b. Fall back to site-wide RSS (from <head> or /feed) filtered by author name
+        # 1c. Fall back to site-wide RSS (from <head> or /feed) filtered by author name
         rss_url = find_rss_in_page(html, url)
         if not rss_url or rss_url == url:
             rss_url = f"{parsed.scheme}://{parsed.netloc}/feed"
