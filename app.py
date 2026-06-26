@@ -30,6 +30,12 @@ except ImportError:
     logging.warning("yt-dlp not installed. YouTube scraping will use fallback method.")
 
 app = Flask(__name__)
+
+# Fly.io terminates SSL at the edge and forwards requests over HTTP internally.
+# ProxyFix reads the X-Forwarded-Proto header so request.url returns https://.
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -367,7 +373,7 @@ def find_rss_in_page(html: str, base_url: str) -> str | None:
 def parse_rss_feed(feed_url: str, enhance_full_text: bool = True, fetch_limit: int = MAX_ITEMS) -> list[dict]:
     """Fetch and parse an existing RSS/Atom feed, optionally enhancing with full text."""
     try:
-        feed = feedparser.parse(feed_url, request_headers=HEADERS)
+        feed = feedparser.parse(feed_url, request_headers=HEADERS, timeout=REQUEST_TIMEOUT)
         if not feed.entries:
             return []
 
@@ -945,7 +951,7 @@ def generate_preview_for_url(url: str, base_url: str) -> dict:
         parsed = urlparse(url)
         feed_url = f"{parsed.scheme}://{parsed.netloc}/feed"
         try:
-            feed = feedparser.parse(feed_url, request_headers=HEADERS)
+            feed = feedparser.parse(feed_url, request_headers=HEADERS, timeout=REQUEST_TIMEOUT)
             title = feed.feed.get("title", parsed.netloc)
             for entry in feed.entries[:5]:
                 content = ""
@@ -962,7 +968,7 @@ def generate_preview_for_url(url: str, base_url: str) -> dict:
 
     elif url_type == "direct_rss":
         try:
-            feed = feedparser.parse(url, request_headers=HEADERS)
+            feed = feedparser.parse(url, request_headers=HEADERS, timeout=REQUEST_TIMEOUT)
             title = feed.feed.get("title", "RSS Feed")
             for entry in feed.entries[:5]:
                 preview_items.append({
@@ -981,7 +987,7 @@ def generate_preview_for_url(url: str, base_url: str) -> dict:
 
         if rss_url:
             try:
-                feed = feedparser.parse(rss_url, request_headers=HEADERS)
+                feed = feedparser.parse(rss_url, request_headers=HEADERS, timeout=REQUEST_TIMEOUT)
                 for entry in feed.entries[:5]:
                     content = ""
                     if hasattr(entry, "content"):
