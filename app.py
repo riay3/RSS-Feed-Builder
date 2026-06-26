@@ -48,7 +48,8 @@ HEADERS = {
 
 MAX_ITEMS = 15          # Max feed entries
 FULL_TEXT_MAX = 3       # Max articles to fetch full text for (keep low to avoid Feedly timeouts)
-REQUEST_TIMEOUT = 15    # Per-request timeout in seconds
+REQUEST_TIMEOUT = 15    # Per-request timeout in seconds (content fetching)
+PROBE_TIMEOUT = 5       # Short timeout for existence checks (WordPress API, per-author feed)
 CACHE_TTL = 1800        # Cache for 30 minutes
 
 
@@ -611,7 +612,7 @@ def try_wordpress_api(base_url: str, author_slug: str) -> list[dict]:
     try:
         # Step 1: resolve slug → numeric author ID
         users_url = f"{base_url}/wp-json/wp/v2/users?slug={author_slug}"
-        r = requests.get(users_url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        r = requests.get(users_url, headers=HEADERS, timeout=PROBE_TIMEOUT)
         if r.status_code != 200:
             return []
         users = r.json()
@@ -701,7 +702,7 @@ def get_generic_items(url: str) -> list[dict]:
 
         # 1b. Try a per-author feed URL directly (works on many WordPress sites)
         per_author_feed = url.rstrip("/") + "/feed/"
-        test = fetch_html(per_author_feed)
+        test = fetch_html(per_author_feed, timeout=PROBE_TIMEOUT)
         if test and "<rss" in test:
             logger.info(f"Found per-author feed: {per_author_feed}")
             items = parse_rss_feed(per_author_feed, enhance_full_text=True)
