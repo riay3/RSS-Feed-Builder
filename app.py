@@ -85,11 +85,24 @@ def cache_set(key: str, data):
 
 # ─── HTTP helper ────────────────────────────────────────────────────────────
 
+_CF_MARKERS = ("cf-browser-verification", "just a moment", "checking your browser",
+               "enable javascript and cookies", "ddos protection by cloudflare",
+               "cf_chl_opt", "challenge-platform")
+
+def _is_bot_challenge(html: str) -> bool:
+    """Return True if the page looks like a Cloudflare or similar bot challenge."""
+    lower = html.lower()
+    return sum(1 for m in _CF_MARKERS if m in lower) >= 2
+
 def fetch_html(url: str, timeout: int = REQUEST_TIMEOUT) -> str | None:
     try:
         r = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
         r.raise_for_status()
-        return r.text
+        html = r.text
+        if _is_bot_challenge(html):
+            logger.warning(f"fetch_html: bot challenge detected [{url}]")
+            return None
+        return html
     except Exception as e:
         logger.warning(f"fetch_html failed [{url}]: {e}")
         return None
